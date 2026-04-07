@@ -1,0 +1,1073 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"/>
+<title>Doodle Jump</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;overflow:hidden;background:#1a1a2e;display:flex;align-items:center;justify-content:center;font-family:'Segoe UI',system-ui,sans-serif}
+.wrap{position:relative;width:min(420px,100vw);height:min(720px,100vh);border-radius:0;overflow:hidden;box-shadow:0 0 60px rgba(0,200,255,.15)}
+canvas{display:block;width:100%;height:100%;image-rendering:auto}
+.overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,.55);backdrop-filter:blur(8px);z-index:10;opacity:1;transition:opacity .4s}
+.overlay.hidden{opacity:0;pointer-events:none}
+.overlay h1{font-size:28px;color:#7fff7f;text-shadow:0 0 20px rgba(0,255,100,.4);margin-bottom:6px;letter-spacing:1px}
+.overlay .sub{color:#cde;font-size:14px;margin-bottom:18px;opacity:.8}
+.overlay .score-final{font-size:42px;font-weight:900;color:#fff;margin:8px 0}
+.overlay .best{color:#7fe;font-size:15px;margin-bottom:16px}
+.btn{background:linear-gradient(135deg,#00c853,#00e676);color:#1a1a2e;border:none;padding:12px 32px;border-radius:30px;font-size:16px;font-weight:700;cursor:pointer;letter-spacing:.5px;transition:transform .15s,box-shadow .15s;box-shadow:0 4px 20px rgba(0,200,100,.3)}
+.btn:hover{transform:scale(1.05);box-shadow:0 6px 30px rgba(0,200,100,.5)}
+.btn:active{transform:scale(.97)}
+.hud{position:absolute;top:12px;left:14px;z-index:5;color:#fff;font-size:18px;font-weight:700;text-shadow:0 2px 8px rgba(0,0,0,.5);pointer-events:none}
+.controls-hint{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);color:rgba(255,255,255,.35);font-size:11px;z-index:5;pointer-events:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+<canvas id="c"></canvas>
+<div class="hud" id="hud">0</div>
+<div class="controls-hint">← → ou A/D · Mobile : incliner pour bouger, taper pour tirer</div>
+<div class="overlay" id="startScreen">
+<h1>🟢 Doodle Jump</h1>
+<div class="sub">Saute de plateforme en plateforme !</div>
+<button class="btn" id="btnStart">Jouer</button>
+</div>
+<div class="overlay hidden" id="endScreen">
+<h1>Game Over</h1>
+<div class="score-final" id="finalScore">0</div>
+<div class="best" id="bestScore">Meilleur : 0</div>
+<button class="btn" id="btnRestart">Rejouer</button>
+</div>
+</div>
+
+<script>
+// ── Assets (local files) ──
+const CHAR_SRC = "images/Doodler_transparent.png";
+const BG_SRC   = ""; // pas de fichier background fourni
+const SND_JUMP  = "son/jump.wav";
+
+const MONSTER_SRC = "images/Monster4.png";
+const SND_MONSTER = "son/soundmonsters.mp3";
+const SND_DEATH = "son/death.mp3";
+
+const SHOOT_SPRITE_SRC = "images/shoot.png";
+const SND_SHOOT1 = "son/shoot1.mp3";
+const SND_SHOOT2 = "son/shoot2.mp3";
+const SND_TRAP = "son/trap.mp3";
+const SND_PADA = "son/death.mp3"; // pada = son de chute (death.mp3)
+const SND_TRAMPOLINE = "son/trampoline.mp3";
+const HOLE_SRC = "images/hole.png";
+const SND_HOLE = "son/hole.mp3";
+
+
+
+// ── Setup ──
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const hud = document.getElementById('hud');
+const startScreen = document.getElementById('startScreen');
+const endScreen = document.getElementById('endScreen');
+const finalScoreEl = document.getElementById('finalScore');
+const bestScoreEl = document.getElementById('bestScore');
+
+const W = 420, H = 720;
+canvas.width = W; canvas.height = H;
+
+// ── Load assets ──
+const playerImg = new Image();
+playerImg.src = CHAR_SRC;
+
+const monsterImg = new Image();
+monsterImg.src = MONSTER_SRC;
+
+const shootImg = new Image();
+shootImg.src = SHOOT_SPRITE_SRC;
+
+
+const bgImg = new Image();
+bgImg.src = BG_SRC;
+
+const greenPlatImg = new Image();
+greenPlatImg.src = "images/green_platform.png";
+
+const bluePlatImg = new Image();
+bluePlatImg.src = "images/blue_platform.png";
+
+const trampolineImg = new Image();
+trampolineImg.src = "images/trampoline.png";
+
+const holeImg = new Image();
+holeImg.src = HOLE_SRC;
+
+// Audio system using HTML5 Audio (compatible file:// et https://)
+let audioReady = false;
+let monsterAudio = null;
+
+function makeSound(src, volume, loop) {
+  const a = new Audio(src);
+  a.volume = volume;
+  a.loop = !!loop;
+  return a;
+}
+
+function playSound(src, volume) {
+  if (!audioReady) return;
+  try {
+    const a = new Audio(src);
+    a.volume = volume;
+    a.play();
+  } catch(e) {}
+}
+
+function initAudio() {
+  audioReady = true;
+}
+
+function playJump() {
+  playSound(SND_JUMP, 0.35);
+}
+
+function playMonsterSound() {
+  if (!audioReady || monsterAudio) return;
+  try {
+    monsterAudio = new Audio(SND_MONSTER);
+    monsterAudio.volume = 0.4;
+    monsterAudio.loop = true;
+    monsterAudio.play();
+  } catch(e) {}
+}
+
+function stopMonsterSound() {
+  if (monsterAudio) {
+    try { monsterAudio.pause(); monsterAudio.currentTime = 0; } catch(e) {}
+    monsterAudio = null;
+  }
+}
+
+function playShootSound() {
+  playSound(Math.random() < 0.5 ? SND_SHOOT1 : SND_SHOOT2, 0.3);
+}
+
+function playDeathSound() {
+  playSound(SND_DEATH, 0.5);
+}
+
+function playTrapSound() {
+  playSound(SND_TRAP, 0.6);
+}
+
+function playPadaSound() {
+  playSound(SND_PADA, 0.7);
+}
+
+function playTrampolineSound() {
+  playSound(SND_TRAMPOLINE, 0.5);
+}
+
+function playHoleSound() {
+  playSound(SND_HOLE, 0.6);
+}
+
+
+
+// ── Constants ──
+const GRAVITY = 0.42;
+const JUMP_VEL = -12.5;
+const SUPER_JUMP = -19.5;
+const MOVE_SPEED = 5.5;
+const SCROLL_LINE = H * 0.38;
+const PLAT_COUNT = 14;
+const PLAT_W_MIN = 58, PLAT_W_MAX = 95;
+const PLAT_H = 14;
+const GAP_MIN = 38, GAP_MAX = 85;
+const PLAYER_W = 66, PLAYER_H = 66;
+const MONSTER_W = 85, MONSTER_H = 50;
+const MONSTER_START_SCORE = 1000;   // pas de monstre avant 1000 pts
+const MONSTER_INTERVAL_MAX = 800;   // intervalle au début (facile)
+const MONSTER_INTERVAL_MIN = 250;   // intervalle en fin de partie (dur)
+const MONSTER_RAMP_SCORE = 8000;    // score auquel on atteint l'intervalle min
+const HOLE_W = 55, HOLE_H = 55;
+const TRAMPOLINE_INTERVAL_MIN = 1200;
+const TRAMPOLINE_INTERVAL_MAX = 1800;
+const TRAMPOLINE_JUMP = -22;
+
+// ── State ──
+let player, platforms, monsters, score, bestScore = 0, cameraY, running, dead, nextMonsterScore;
+let holes = []; // {x, y, w, h, platRef}
+let suckedIn = false, suckedInTime = 0, suckedInHole = null; // hole death animation
+let stunned = false, stunnedTime = 0;
+let projectiles = []; // {x, y, vy}
+let shooting = false, shootTimer = 0; // for shoot sprite display
+let backflipAngle = 0, backflipping = false; // for trampoline backflip
+let nextTrampolineScore = 1500; // will be randomized in init()
+let keys = { l:false, r:false };
+let particles = [];
+let screenShake = 0;
+let bgPattern = null;
+
+// Create tiled background pattern
+bgImg.onload = () => {
+  const pc = document.createElement('canvas');
+  pc.width = bgImg.naturalWidth;
+  pc.height = bgImg.naturalHeight;
+  pc.getContext('2d').drawImage(bgImg, 0, 0);
+  bgPattern = ctx.createPattern(pc, 'repeat');
+};
+
+// ── Platform types ──
+const PT = { NORMAL:0, MOVING:1, FRAGILE:2, SPRING:3 };
+const PT_COLORS = {
+  [PT.NORMAL]:  { top:'#4caf50', body:'#388e3c', shine:'rgba(255,255,255,.25)' },
+  [PT.MOVING]:  { top:'#42a5f5', body:'#1e88e5', shine:'rgba(255,255,255,.2)' },
+  [PT.FRAGILE]: { top:'#ef9a9a', body:'#e57373', shine:'rgba(255,255,255,.15)' },
+  [PT.SPRING]:  { top:'#ffb74d', body:'#ff9800', shine:'rgba(255,255,255,.25)' },
+};
+
+function rand(a,b){ return Math.random()*(b-a)+a; }
+function randI(a,b){ return Math.floor(rand(a,b+1)); }
+
+function makePlat(x, y, type=PT.NORMAL) {
+  const w = randI(PLAT_W_MIN, PLAT_W_MAX);
+  return {
+    x, y, w, h: PLAT_H, type,
+    vx: type===PT.MOVING ? rand(1,2.2)*(Math.random()<.5?-1:1) : 0,
+    broken: false,
+    breakAnim: 0,
+    springAnim: 0,
+    hasTrampoline: false,
+  };
+}
+
+function spawnParticles(x, y, color, count=6) {
+  for(let i=0;i<count;i++){
+    particles.push({
+      x, y,
+      vx: rand(-3,3), vy: rand(-4,-1),
+      life: 1, decay: rand(.02,.05),
+      size: rand(2,5), color
+    });
+  }
+}
+
+function init() {
+  player = {
+    x: W/2 - PLAYER_W/2, y: H - 140,
+    w: PLAYER_W, h: PLAYER_H,
+    vx:0, vy:0,
+    facing: 1, // 1=right, -1=left
+    squash: 1, // for squash-stretch
+  };
+  platforms = [];
+  particles = [];
+  monsters = [];
+  holes = [];
+  score = 0; cameraY = 0; dead = false;
+  suckedIn = false; suckedInTime = 0; suckedInHole = null;
+  screenShake = 0; nextMonsterScore = MONSTER_START_SCORE; stunned = false; stunnedTime = 0; projectiles = []; shooting = false; shootTimer = 0;
+  backflipAngle = 0; backflipping = false; nextTrampolineScore = randI(TRAMPOLINE_INTERVAL_MIN, TRAMPOLINE_INTERVAL_MAX);
+  stopMonsterSound();
+
+  // Generate initial platforms
+  let cy = H - 50;
+  // Guaranteed platform under player
+  platforms.push(makePlat(player.x - 20, player.y + player.h + 8, PT.NORMAL));
+  for(let i=0; i<PLAT_COUNT; i++){
+    const gap = randI(GAP_MIN, GAP_MAX);
+    cy -= gap;
+    const px = randI(10, W - PLAT_W_MAX - 10);
+    let type = PT.NORMAL;
+    if(i > 2) {
+      const r = Math.random();
+      if(r < .08) type = PT.SPRING;
+      else if(r < .20) type = PT.FRAGILE;
+      else if(r < .35) type = PT.MOVING;
+    }
+    platforms.push(makePlat(px, cy, type));
+  }
+}
+
+// ── Update ──
+function update(dt) {
+  if(dead) return;
+  const t = dt / 16.667; // normalize to ~60fps
+
+  // SuckedIn state: player shrinks into hole then game over
+  if(suckedIn) {
+    suckedInTime += t;
+    // Shrink player toward hole center
+    const shrinkSpeed = 0.04;
+    player.w *= (1 - shrinkSpeed * t);
+    player.h *= (1 - shrinkSpeed * t);
+    // Move player toward hole center
+    if(suckedInHole) {
+      const hcx = suckedInHole.x + suckedInHole.w / 2;
+      const hcy = suckedInHole.y + suckedInHole.h / 2;
+      player.x += (hcx - player.x - player.w/2) * 0.15 * t;
+      player.y += (hcy - player.y - player.h/2) * 0.15 * t;
+    }
+    if(player.w < 3 || suckedInTime > 40) {
+      dead = true; running = false; suckedIn = false;
+      if(score > bestScore) bestScore = Math.floor(score);
+      finalScoreEl.textContent = Math.floor(score);
+      bestScoreEl.textContent = 'Meilleur : ' + bestScore;
+      endScreen.classList.remove('hidden');
+    }
+    return;
+  }
+
+  // Input - Gyroscope OR keyboard/touch buttons
+  if(gyroEnabled && isMobile) {
+    const deadZone = 2.5;  // slight dead zone for noise
+    const maxTilt = 18;    // full speed at just 18° tilt (was 25)
+    let tilt = gyroGamma;
+    tilt = Math.max(-maxTilt, Math.min(maxTilt, tilt));
+    if(Math.abs(tilt) < deadZone) {
+      tilt = 0;
+    } else {
+      tilt = (tilt - Math.sign(tilt) * deadZone) / (maxTilt - deadZone);
+    }
+    // Gentle curve — mostly linear, slight boost to small tilts
+    tilt = Math.sign(tilt) * Math.pow(Math.abs(tilt), 1.1);
+    tilt = Math.max(-1, Math.min(1, tilt));
+    // Faster smoothing for snappier response
+    const targetVx = tilt * MOVE_SPEED * 1.8;
+    player.vx += (targetVx - player.vx) * 0.35;
+    if(tilt < -0.2) player.facing = -1;
+    else if(tilt > 0.2) player.facing = 1;
+  } else {
+    // Keyboard or mobile touch zones
+    if(keys.l) { player.vx = -MOVE_SPEED; player.facing = -1; }
+    else if(keys.r) { player.vx = MOVE_SPEED; player.facing = 1; }
+    else player.vx *= 0.75;
+  }
+
+  // Move X with wrap
+  player.x += player.vx * t;
+  if(player.x + player.w < 0) player.x = W;
+  if(player.x > W) player.x = -player.w;
+
+  // Gravity
+  player.vy += GRAVITY * t;
+  player.y += player.vy * t;
+
+  // Squash-stretch
+  if(player.vy < -2) player.squash = Math.max(0.8, 1 + player.vy * 0.012);
+  else if(player.vy > 2) player.squash = Math.min(1.2, 1 + player.vy * 0.008);
+  else player.squash += (1 - player.squash) * 0.15;
+
+  // Backflip rotation (from trampoline)
+  if(backflipping) {
+    backflipAngle += 0.18 * t; // vitesse de rotation
+    if(backflipAngle >= Math.PI * 2) {
+      backflipAngle = 0;
+      backflipping = false;
+    }
+  }
+
+  // Scroll camera
+  if(player.y < SCROLL_LINE) {
+    const dy = SCROLL_LINE - player.y;
+    cameraY += dy;
+    player.y = SCROLL_LINE;
+    for(const p of platforms) p.y += dy;
+    for(const pr of particles) pr.y += dy;
+    for(const m of monsters) m.y += dy;
+    for(const h of holes) h.y += dy;
+    for(const pr of projectiles) pr.y += dy;
+    score += dy * 0.3;
+    hud.textContent = Math.floor(score);
+    // Spawn monster or hole
+    if(score >= nextMonsterScore) {
+      if(Math.random() < 0.5) {
+        // Spawn floating monster
+        const my = -MONSTER_H - randI(40, 120);
+        let mx = randI(30, W - MONSTER_W - 30);
+        let attempts = 0;
+        let safe = false;
+        while(!safe && attempts < 20) {
+          safe = true;
+          for(const p of platforms) {
+            const vertClose = Math.abs(p.y - my) < (MONSTER_H + PLAT_H + 30);
+            const horizOverlap = (mx + MONSTER_W > p.x - 15) && (mx < p.x + p.w + 15);
+            if(vertClose && horizOverlap) { safe = false; break; }
+            if(p.type === PT.SPRING) {
+              const springSafeTop = p.y - 380;
+              const springSafeBottom = p.y - 40;
+              const inSafeZoneY = my > springSafeTop && my < springSafeBottom;
+              const centerX = p.x + p.w / 2;
+              const inSafeZoneX = Math.abs(mx + MONSTER_W/2 - centerX) < (MONSTER_W + 60);
+              if(inSafeZoneY && inSafeZoneX) { safe = false; break; }
+            }
+          }
+          if(!safe) { mx = randI(30, W - MONSTER_W - 30); attempts++; }
+        }
+        monsters.push({ x:mx, y:my, w:MONSTER_W, h:MONSTER_H, alive:true, floatT:Math.random()*Math.PI*2 });
+      } else {
+        // Spawn hole in the void (between platforms), above screen
+        const hy = -HOLE_H - randI(40, 120);
+        const hx = randI(30, W - HOLE_W - 30);
+        holes.push({ x: hx, y: hy, w: HOLE_W, h: HOLE_H });
+      }
+      // Prochain monstre : intervalle progressif
+      const progress = Math.min((score - MONSTER_START_SCORE) / MONSTER_RAMP_SCORE, 1);
+      const interval = MONSTER_INTERVAL_MAX - (MONSTER_INTERVAL_MAX - MONSTER_INTERVAL_MIN) * progress;
+      nextMonsterScore += interval;
+    }
+    // Spawn trampoline on a random NORMAL platform every TRAMPOLINE_INTERVAL
+    if(score >= nextTrampolineScore) {
+      // Find NORMAL platforms without trampoline that are near top of screen
+      const candidates = platforms.filter(p => p.type === PT.NORMAL && !p.hasTrampoline && p.y < H * 0.5);
+      if(candidates.length > 0) {
+        candidates[randI(0, candidates.length - 1)].hasTrampoline = true;
+      }
+      nextTrampolineScore += randI(TRAMPOLINE_INTERVAL_MIN, TRAMPOLINE_INTERVAL_MAX);
+    }
+  }
+
+  // Platform logic
+  for(const p of platforms) {
+    // Moving platforms
+    if(p.type === PT.MOVING && !p.broken) {
+      p.x += p.vx * t;
+      if(p.x < 5) { p.x = 5; p.vx *= -1; }
+      if(p.x + p.w > W - 5) { p.x = W - 5 - p.w; p.vx *= -1; }
+    }
+    // Break anim
+    if(p.broken) {
+      p.breakAnim += 0.06 * t;
+      p.y += 4 * t;
+    }
+    // Spring anim
+    if(p.springAnim > 0) p.springAnim -= 0.08 * t;
+  }
+
+  // Stunned state: player falls with stars through platforms, then game over
+  if(stunned) {
+    stunnedTime += t;
+    // Chute lente à vitesse constante (traverse les plateformes)
+    player.vy += GRAVITY * 0.3 * t;
+    if(player.vy > 3) player.vy = 3; // limiter la vitesse de chute
+    player.y += player.vy * t;
+    if(player.y > H + 80) {
+      dead = true; running = false; stunned = false;
+      playDeathSound();
+      if(score > bestScore) bestScore = Math.floor(score);
+      finalScoreEl.textContent = Math.floor(score);
+      bestScoreEl.textContent = 'Meilleur : ' + bestScore;
+      endScreen.classList.remove('hidden');
+    }
+    for(let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx * t; p.y += p.vy * t; p.vy += 0.15 * t;
+      p.life -= p.decay * t;
+      if(p.life <= 0) particles.splice(i, 1);
+    }
+    if(screenShake > 0) screenShake *= 0.85;
+    return;
+  }
+
+  // Landing detection (only when falling)
+  if(player.vy > 0) {
+    const feet = player.y + player.h;
+    for(const p of platforms) {
+      if(p.broken) continue;
+      const onX = (player.x + player.w - 8 > p.x) && (player.x + 8 < p.x + p.w);
+      const onY = feet >= p.y && feet <= p.y + p.h + player.vy * t + 4;
+      if(onX && onY) {
+        if(p.type === PT.FRAGILE) {
+          p.broken = true;
+          player.vy = JUMP_VEL * 0.85;
+          spawnParticles(p.x + p.w/2, p.y, '#e57373', 8);
+          screenShake = 4;
+          playJump();
+        } else if(p.type === PT.SPRING) {
+          player.vy = SUPER_JUMP;
+          p.springAnim = 1;
+          spawnParticles(p.x + p.w/2, p.y, '#ffb74d', 10);
+          playJump();
+        } else {
+          // Check trampoline on normal platform
+          if(p.hasTrampoline) {
+            player.vy = TRAMPOLINE_JUMP;
+            backflipping = true;
+            backflipAngle = 0;
+            spawnParticles(p.x + p.w/2, p.y, '#ff5555', 12);
+            screenShake = 5;
+            playTrampolineSound();
+          } else {
+            player.vy = JUMP_VEL;
+            spawnParticles(p.x + p.w/2, p.y, '#81c784', 5);
+            playJump();
+          }
+        }
+        player.y = p.y - player.h;
+        player.squash = 1.25; // land squash
+        break;
+      }
+    }
+  }
+
+  // Projectile update
+  for(let i = projectiles.length - 1; i >= 0; i--) {
+    const pr = projectiles[i];
+    pr.x += pr.vx * t;
+    pr.y += pr.vy * t;
+    // Off screen (any edge)
+    if(pr.y < -20 || pr.x < -20 || pr.x > W + 20) { projectiles.splice(i, 1); continue; }
+    // Hit monster
+    for(let j = monsters.length - 1; j >= 0; j--) {
+      const m = monsters[j];
+      if(!m.alive) continue;
+      const monY = m.y + (m.floatY||0);
+      if(pr.x + pr.w > m.x && pr.x < m.x + m.w && pr.y < monY + m.h && pr.y + pr.h > monY) {
+        m.alive = false;
+        projectiles.splice(i, 1);
+        spawnParticles(m.x + m.w/2, monY, '#42a5f5', 12);
+        screenShake = 5;
+        stopMonsterSound();
+        score += 50;
+        hud.textContent = Math.floor(score);
+        break;
+      }
+    }
+  }
+  // Shoot sprite timer
+  if(shooting) { shootTimer += t; if(shootTimer > 12) shooting = false; }
+
+  // Monster update
+  for(let i = monsters.length - 1; i >= 0; i--) {
+    const m = monsters[i];
+    m.floatT += 0.04 * t;
+    m.floatY = Math.sin(m.floatT) * 8;
+    const monY = m.y + (m.floatY||0);
+    // Remove if fallen below screen - stop sound immediately
+    if(m.y > H + 20) { monsters.splice(i, 1); stopMonsterSound(); continue; }
+    if(!m.alive) continue;
+    // Sound logic:
+    // - Play sound when monster is ABOVE screen but approaching (within ~100pts preview zone)
+    // - Keep playing while on screen
+    // - Stop IMMEDIATELY when monster goes below screen bottom
+    const isAboveApproaching = monY < 0 && monY > -300; // ~300px preview zone above screen
+    const isOnScreen = monY > -m.h && monY < H;
+    const isBelowScreen = monY >= H;
+    if(isBelowScreen) {
+      stopMonsterSound();
+    } else if(isAboveApproaching || isOnScreen) {
+      playMonsterSound();
+    } else {
+      // Too far above - no sound yet
+      stopMonsterSound();
+    }
+    // Player lands on monster
+    if(player.vy > 0) {
+      const feet = player.y + player.h;
+      const monY = m.y + (m.floatY||0);
+      const onX = player.x + player.w - 8 > m.x && player.x + 8 < m.x + m.w;
+      const onY = feet >= monY && feet <= monY + m.h/2 + player.vy * t + 5;
+      if(onX && onY) {
+        m.alive = false; player.vy = SUPER_JUMP; player.squash = 1.3;
+        spawnParticles(m.x + m.w/2, m.y, '#42a5f5', 15); screenShake = 8;
+        stopMonsterSound(); playJump();
+      }
+    }
+    // Monster kills player (side/bottom)
+    if(m.alive && !stunned) {
+      const monY = m.y + (m.floatY||0);
+      const overlap = player.x+player.w-5 > m.x && player.x+5 < m.x+m.w &&
+                      player.y+player.h > monY+m.h/3 && player.y < monY+m.h;
+      if(overlap) {
+        stunned = true; stunnedTime = 0;
+        player.vy = -2; // tiny bounce up before falling
+        stopMonsterSound(); playTrapSound();
+      }
+    }
+  }
+
+  // Hole update & collision
+  for(let i = holes.length - 1; i >= 0; i--) {
+    const h = holes[i];
+    if(h.y > H + 60) { holes.splice(i, 1); continue; }
+    // Player touches hole
+    if(!stunned && !suckedIn) {
+      const pcx = player.x + player.w/2;
+      const pcy = player.y + player.h/2;
+      const hcx = h.x + h.w/2;
+      const hcy = h.y + h.h/2;
+      const dx = pcx - hcx, dy = pcy - hcy;
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      if(dist < (h.w/2 + player.w/4)) {
+        suckedIn = true; suckedInTime = 0; suckedInHole = h;
+        player.vx = 0; player.vy = 0;
+        stopMonsterSound(); playHoleSound();
+      }
+    }
+  }
+
+  // Remove off-screen platforms, add new ones
+  for(let i = platforms.length - 1; i >= 0; i--) {
+    if(platforms[i].y > H + 60) platforms.splice(i, 1);
+  }
+  while(platforms.length < PLAT_COUNT) {
+    let highestY = Infinity;
+    for(const p of platforms) if(p.y < highestY) highestY = p.y;
+    if(!isFinite(highestY)) highestY = player.y - 50;
+    const ny = highestY - randI(GAP_MIN, GAP_MAX);
+    const nx = randI(10, W - PLAT_W_MAX - 10);
+    let type = PT.NORMAL;
+    const diff = Math.min(score / 3000, 1); // difficulty ramp
+    const r = Math.random();
+    if(r < .05 + diff * .05) type = PT.SPRING;
+    else if(r < .15 + diff * .12) type = PT.FRAGILE;
+    else if(r < .30 + diff * .08) type = PT.MOVING;
+    platforms.push(makePlat(nx, ny, type));
+  }
+
+  // Particles
+  for(let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx * t;
+    p.y += p.vy * t;
+    p.vy += 0.15 * t;
+    p.life -= p.decay * t;
+    if(p.life <= 0) particles.splice(i, 1);
+  }
+
+  // Screen shake decay
+  if(screenShake > 0) screenShake *= 0.85;
+
+  // Death
+  if(player.y > H + 80) {
+    dead = true;
+    running = false;
+    playDeathSound();
+    if(score > bestScore) bestScore = Math.floor(score);
+    finalScoreEl.textContent = Math.floor(score);
+    bestScoreEl.textContent = 'Meilleur : ' + bestScore;
+    endScreen.classList.remove('hidden');
+  }
+}
+
+// ── Render ──
+function render() {
+  ctx.save();
+
+  // Screen shake
+  if(screenShake > 0.5) {
+    ctx.translate(rand(-screenShake, screenShake), rand(-screenShake, screenShake));
+  }
+
+  // Background
+  if(bgPattern) {
+    ctx.save();
+    // Subtle parallax scroll
+    ctx.translate(0, (cameraY * 0.05) % 200);
+    ctx.fillStyle = bgPattern;
+    ctx.fillRect(-200, -200, W + 400, H + 400);
+    ctx.restore();
+  } else {
+    ctx.fillStyle = '#f5f0e8';
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // Subtle gradient overlay for depth
+  const grd = ctx.createLinearGradient(0, 0, 0, H);
+  grd.addColorStop(0, 'rgba(200,230,255,.12)');
+  grd.addColorStop(1, 'rgba(255,245,220,.08)');
+  ctx.fillStyle = grd;
+  ctx.fillRect(0, 0, W, H);
+
+  // Platforms
+  for(const p of platforms) {
+    if(p.broken && p.breakAnim > 1) continue;
+    const alpha = p.broken ? Math.max(0, 1 - p.breakAnim) : 1;
+    ctx.globalAlpha = alpha;
+
+    if(p.type === PT.NORMAL && greenPlatImg.complete && greenPlatImg.naturalWidth) {
+      // Sprite pour plateforme verte normale
+      ctx.drawImage(greenPlatImg, p.x, p.y, p.w, p.h);
+    } else if(p.type === PT.MOVING && bluePlatImg.complete && bluePlatImg.naturalWidth) {
+      // Sprite pour plateforme bleue mobile
+      ctx.drawImage(bluePlatImg, p.x, p.y, p.w, p.h);
+    } else {
+      const c = PT_COLORS[p.type];
+
+      // Shadow
+      ctx.fillStyle = 'rgba(0,0,0,.08)';
+      roundRect(ctx, p.x + 2, p.y + 3, p.w, p.h, 7);
+      ctx.fill();
+
+      // Body
+      ctx.fillStyle = c.body;
+      roundRect(ctx, p.x, p.y, p.w, p.h, 7);
+      ctx.fill();
+
+      // Top shine
+      ctx.fillStyle = c.top;
+      roundRect(ctx, p.x, p.y, p.w, p.h * 0.6, 7);
+      ctx.fill();
+
+      // Highlight line
+      ctx.fillStyle = c.shine;
+      ctx.fillRect(p.x + 6, p.y + 2, p.w - 12, 2);
+    }
+
+    // Spring indicator
+    if(p.type === PT.SPRING) {
+      const sy = p.springAnim > 0 ? -8 * p.springAnim : 0;
+      ctx.fillStyle = '#ff5722';
+      const sw = 10, sh = 8;
+      ctx.fillRect(p.x + p.w/2 - sw/2, p.y - sh + sy, sw, sh);
+      ctx.fillStyle = '#ff8a65';
+      ctx.fillRect(p.x + p.w/2 - sw/2 + 2, p.y - sh + sy + 1, sw - 4, 3);
+    }
+
+    // Trampoline on platform
+    if(p.hasTrampoline && trampolineImg.complete && trampolineImg.naturalWidth) {
+      const tw = 32, th = 16;
+      ctx.drawImage(trampolineImg, p.x + p.w/2 - tw/2, p.y - th, tw, th);
+    }
+
+    ctx.globalAlpha = 1;
+  }
+
+  // Particles
+  for(const p of particles) {
+    ctx.globalAlpha = p.life;
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+
+  // Projectiles
+  ctx.fillStyle = '#ff5722';
+  for(const pr of projectiles) {
+    ctx.beginPath();
+    ctx.ellipse(pr.x + pr.w/2, pr.y + pr.h/2, pr.w/2, pr.h/2, 0, 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  // Holes
+  for(const h of holes) {
+    if(holeImg.complete && holeImg.naturalWidth) {
+      ctx.drawImage(holeImg, h.x, h.y, h.w, h.h);
+    } else {
+      ctx.fillStyle = '#111';
+      ctx.beginPath();
+      ctx.ellipse(h.x + h.w/2, h.y + h.h/2, h.w/2, h.h/2, 0, 0, Math.PI*2);
+      ctx.fill();
+    }
+  }
+
+  // Monsters
+  for(const m of monsters) {
+    if(!m.alive) continue;
+    const my = m.y + (m.floatY||0);
+    if(monsterImg.complete && monsterImg.naturalWidth) {
+      ctx.drawImage(monsterImg, m.x, my, m.w, m.h);
+    } else {
+      ctx.fillStyle = '#42a5f5';
+      ctx.fillRect(m.x, my, m.w, m.h);
+    }
+  }
+
+  // Player
+  if(playerImg.complete && playerImg.naturalWidth) {
+    ctx.save();
+    const cx = player.x + player.w / 2;
+    const cy2 = player.y + player.h / 2;
+    ctx.translate(cx, cy2);
+    if(backflipping) {
+      ctx.rotate(-backflipAngle); // rotation arrière
+    }
+    ctx.scale(player.facing * (2 - player.squash), player.squash);
+    const isShoot = shooting && shootImg.complete && shootImg.naturalWidth;
+    if(isShoot) {
+      // Garder la même hauteur que le Doodler normal, ajuster la largeur selon le ratio du sprite de tir
+      const ratio = shootImg.naturalWidth / shootImg.naturalHeight;
+      const drawH = player.h;
+      const drawW = drawH * ratio;
+      ctx.drawImage(shootImg, -drawW/2, -drawH/2, drawW, drawH);
+    } else {
+      ctx.drawImage(playerImg, -player.w/2, -player.h/2, player.w, player.h);
+    }
+    ctx.restore();
+  } else {
+    // Fallback
+    ctx.fillStyle = '#4caf50';
+    roundRect(ctx, player.x, player.y, player.w, player.h, 10);
+    ctx.fill();
+  }
+
+  // Draw spinning stars above head when stunned
+  if(stunned) {
+    const starCx = player.x + player.w / 2;
+    const starCy = player.y - 10;
+    const numStars = 4;
+    const starRadius = 18;
+    const baseAngle = stunnedTime * 4; // rotation speed
+    ctx.save();
+    for(let i = 0; i < numStars; i++) {
+      const angle = baseAngle + (Math.PI * 2 / numStars) * i;
+      const sx = starCx + Math.cos(angle) * starRadius;
+      const sy = starCy + Math.sin(angle) * (starRadius * 0.5);
+      // Draw a 4-point star
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.rotate(baseAngle * 1.5 + i);
+      ctx.fillStyle = i % 2 === 0 ? '#FFD700' : '#FFA500';
+      ctx.beginPath();
+      for(let j = 0; j < 8; j++) {
+        const r = j % 2 === 0 ? 5 : 2;
+        const a = (Math.PI / 4) * j - Math.PI / 2;
+        if(j === 0) ctx.moveTo(Math.cos(a)*r, Math.sin(a)*r);
+        else ctx.lineTo(Math.cos(a)*r, Math.sin(a)*r);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  ctx.restore();
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  r = Math.min(r, w/2, h/2);
+  ctx.beginPath();
+  ctx.moveTo(x+r, y);
+  ctx.arcTo(x+w, y, x+w, y+h, r);
+  ctx.arcTo(x+w, y+h, x, y+h, r);
+  ctx.arcTo(x, y+h, x, y, r);
+  ctx.arcTo(x, y, x+w, y, r);
+  ctx.closePath();
+}
+
+// ── Game loop (fixed timestep with interpolation) ──
+let lastTs = 0;
+function loop(ts) {
+  if(!running) return;
+  if(!lastTs) lastTs = ts;
+  const dt = Math.min(ts - lastTs, 33.33); // cap at ~30fps equiv
+  lastTs = ts;
+  update(dt);
+  render();
+  requestAnimationFrame(loop);
+}
+
+
+// Shooting with mouse/touch - directional
+canvas.addEventListener('mousedown', (e) => {
+  if(!running || stunned || suckedIn || dead) return;
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = W / rect.width, scaleY = H / rect.height;
+  const mx = (e.clientX - rect.left) * scaleX;
+  const my = (e.clientY - rect.top) * scaleY;
+  fireProjectile(mx, my);
+});
+
+function fireProjectile(targetX, targetY) {
+  const startX = player.x + player.w / 2;
+  const startY = player.y;
+  // Direction vector from player to click
+  let dx = targetX - startX;
+  let dy = targetY - startY;
+  const len = Math.sqrt(dx*dx + dy*dy);
+  if(len < 1) { dx = 0; dy = -1; } else { dx /= len; dy /= len; }
+  // Force upward component: if aiming down, redirect upward
+  if(dy > -0.15) dy = -0.15;
+  // Re-normalize
+  const len2 = Math.sqrt(dx*dx + dy*dy);
+  dx /= len2; dy /= len2;
+  const speed = 14;
+  projectiles.push({ x: startX - 3, y: startY - 4, w: 6, h: 10, vx: dx * speed, vy: dy * speed });
+  shooting = true; shootTimer = 0;
+  // Face the shooting direction
+  if(dx < -0.1) player.facing = -1;
+  else if(dx > 0.1) player.facing = 1;
+  playShootSound();
+}
+
+function startGame() {
+  initAudio();
+  tryEnableGyro();
+  init();
+  startScreen.classList.add('hidden');
+  endScreen.classList.add('hidden');
+  running = true;
+  lastTs = 0;
+  hud.textContent = '0';
+  requestAnimationFrame(loop);
+}
+
+// ── Input ──
+window.addEventListener('keydown', e => {
+  if(e.key==='ArrowLeft'||e.key==='a'||e.key==='A') { keys.l=true; e.preventDefault(); }
+  if(e.key==='ArrowRight'||e.key==='d'||e.key==='D') { keys.r=true; e.preventDefault(); }
+});
+window.addEventListener('keyup', e => {
+  if(e.key==='ArrowLeft'||e.key==='a'||e.key==='A') keys.l=false;
+  if(e.key==='ArrowRight'||e.key==='d'||e.key==='D') keys.r=false;
+});
+
+// ── Mobile controls ──
+// PRIMARY: Gyroscope (tilt to move) — requires HTTPS or localhost
+// FALLBACK: Touch left/right side of screen to move
+// TAP = shoot (always)
+let isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+let gyroEnabled = false;
+let gyroGamma = 0;
+let gyroRequested = false;
+let secureContext = (window.isSecureContext !== false); // true if secure or unknown
+
+function tryEnableGyro() {
+  if(gyroRequested || !isMobile) return;
+  gyroRequested = true;
+
+  // iOS permission
+  if(typeof DeviceOrientationEvent !== 'undefined' &&
+     typeof DeviceOrientationEvent.requestPermission === 'function') {
+    DeviceOrientationEvent.requestPermission().then(r => {
+      if(r === 'granted') listenSensors();
+    }).catch(()=>{});
+    return;
+  }
+  listenSensors();
+}
+
+function listenSensors() {
+  let source = ''; // track which API is providing data
+
+  // Classic deviceorientation — BEST source, most reliable
+  window.addEventListener('deviceorientation', e => {
+    if(e.gamma === null) return;
+    gyroEnabled = true;
+    source = 'orientation';
+    const orient = screen.orientation ? screen.orientation.angle : (window.orientation || 0);
+    if(orient === 90) gyroGamma = -e.beta;
+    else if(orient === -90 || orient === 270) gyroGamma = e.beta;
+    else gyroGamma = e.gamma;
+  });
+
+  // Generic Sensor API — fallback only if deviceorientation doesn't fire
+  setTimeout(() => {
+    if(source) return; // orientation already works, skip
+    try {
+      if('Accelerometer' in window) {
+        const accel = new Accelerometer({frequency: 30});
+        accel.addEventListener('reading', () => {
+          if(source === 'orientation') return; // orientation took over
+          gyroEnabled = true;
+          source = 'accel';
+          // x: m/s², positive = tilt right. Map to gamma-like degrees
+          gyroGamma = (accel.x / 9.8) * 45;
+        });
+        accel.start();
+      }
+    } catch(e) {}
+  }, 500);
+
+  // devicemotion — last resort fallback
+  setTimeout(() => {
+    if(source) return;
+    window.addEventListener('devicemotion', e => {
+      if(source === 'orientation' || source === 'accel') return;
+      const acc = e.accelerationIncludingGravity;
+      if(!acc || acc.x === null) return;
+      gyroEnabled = true;
+      source = 'motion';
+      gyroGamma = -(acc.x / 9.8) * 45;
+    });
+  }, 1500);
+}
+
+// Touch: multitouch support — one finger can move, another can shoot
+// We track a "move touch" (on left/right edges) and "shoot touch" separately
+let moveTouchId = null;
+let moveDir = 0; // -1 left, 0 none, +1 right
+
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  initAudio();
+  tryEnableGyro();
+  if(!running || stunned || suckedIn || dead) return;
+
+  if(isMobile && gyroEnabled) {
+    // Gyro mode: ALL touches = shoot
+    for(let i = 0; i < e.changedTouches.length; i++) {
+      const t = e.changedTouches[i];
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = W / rect.width, scaleY = H / rect.height;
+      const tx = (t.clientX - rect.left) * scaleX;
+      const ty = (t.clientY - rect.top) * scaleY;
+      fireProjectile(tx, ty);
+    }
+    return;
+  }
+
+  if(isMobile && !gyroEnabled) {
+    // No gyro fallback: tap left/right side = move, tap center = shoot
+    // Left 30% = move left, right 30% = move right, center 40% = shoot
+    for(let i = 0; i < e.changedTouches.length; i++) {
+      const t = e.changedTouches[i];
+      const rect = canvas.getBoundingClientRect();
+      const relX = (t.clientX - rect.left) / rect.width; // 0..1
+      const scaleX = W / rect.width, scaleY = H / rect.height;
+
+      if(relX < 0.30) {
+        // Left zone: move left
+        moveTouchId = t.identifier;
+        moveDir = -1;
+        keys.l = true; keys.r = false;
+      } else if(relX > 0.70) {
+        // Right zone: move right
+        moveTouchId = t.identifier;
+        moveDir = 1;
+        keys.r = true; keys.l = false;
+      } else {
+        // Center zone: shoot
+        const tx = (t.clientX - rect.left) * scaleX;
+        const ty = (t.clientY - rect.top) * scaleY;
+        fireProjectile(tx, ty);
+      }
+    }
+    return;
+  }
+
+  // Desktop touch fallback
+  const tx = e.touches[0].clientX;
+  const rect = canvas.getBoundingClientRect();
+  const mid = rect.left + rect.width / 2;
+  if(tx < mid) { keys.l = true; keys.r = false; }
+  else { keys.r = true; keys.l = false; }
+}, {passive:false});
+
+canvas.addEventListener('touchend', e => {
+  for(let i = 0; i < e.changedTouches.length; i++) {
+    if(e.changedTouches[i].identifier === moveTouchId) {
+      moveTouchId = null;
+      moveDir = 0;
+      keys.l = false; keys.r = false;
+    }
+  }
+}, {passive:false});
+
+canvas.addEventListener('touchcancel', e => {
+  moveTouchId = null; moveDir = 0;
+  keys.l = false; keys.r = false;
+}, {passive:false});
+
+// Try gyro on load
+if(isMobile) { try { tryEnableGyro(); } catch(e) {} }
+
+// Buttons
+document.getElementById('btnStart').addEventListener('click', startGame);
+document.getElementById('btnRestart').addEventListener('click', startGame);
+
+window.focus();
+</script>
+</body>
+</html>

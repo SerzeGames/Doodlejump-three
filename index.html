@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"/>
+<title>Doodle Jump</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;overflow:hidden;background:#f5f0e8;display:flex;align-items:center;justify-content:center;font-family:'Segoe UI',system-ui,sans-serif}
+.menu{display:flex;flex-direction:column;align-items:center;gap:18px;padding:40px;text-align:center}
+.menu h1{font-size:42px;color:#388e3c;text-shadow:2px 2px 0 rgba(0,0,0,.1);margin-bottom:4px;font-family:'Comic Sans MS','Segoe UI',sans-serif}
+.menu .sub{color:#666;font-size:15px;margin-bottom:20px}
+.menu-btn{width:260px;padding:18px 24px;border:3px solid #333;border-radius:40px;background:#fff;font-size:20px;font-weight:700;cursor:pointer;transition:transform .15s,box-shadow .15s,background .15s;box-shadow:0 4px 15px rgba(0,0,0,.1);font-family:'Comic Sans MS','Segoe UI',sans-serif;color:#333}
+.menu-btn:hover{transform:scale(1.05);box-shadow:0 6px 25px rgba(0,0,0,.15)}
+.menu-btn:active{transform:scale(.97)}
+.menu-btn.solo{background:#c8f7c8;border-color:#4caf50}
+.menu-btn.solo:hover{background:#a5e8a5}
+.menu-btn.multi{background:#c8e0f7;border-color:#42a5f5}
+.menu-btn.multi:hover{background:#a5ccf0}
+.doodler-img{width:100px;height:100px;image-rendering:auto;margin-bottom:10px}
+</style>
+</head>
+<body>
+<div class="menu">
+<img src="images/Doodler_transparent.png" class="doodler-img" alt="Doodler"/>
+<h1>Doodle Jump</h1>
+<div class="sub">Saute de plateforme en plateforme !</div>
+<button class="menu-btn solo" onclick="location.href='solo.html'">Mode Solo</button>
+<button class="menu-btn multi" onclick="location.href='multi.html'">Multijoueur</button>
+</div>
+</body>
+</html>
